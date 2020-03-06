@@ -33,46 +33,21 @@ if __name__ == "__main__":
     mnist = MNIST()
 
     data = tf.convert_to_tensor(mnist.train.data["images"][:args.examples])
-    # TODO: Data has shape [args.examples, MNIST.H, MNIST.W, MNIST.C].
-    # We want to reshape it to [args.examples, MNIST.H * MNIST.W * MNIST.C].
-    # We can do so using `tf.reshape(data, new_shape)` with new shape
-    # `[data.shape[0], data.shape[1] * data.shape[2] * data.shape[3]]`.
-    data = ...
 
-    # TODO: Now compute mean of every feature. Use `tf.math.reduce_mean`,
-    # and set `axis` to zero -- therefore, the mean will be computed
-    # across the first dimension, so across examples.
-    mean = ...
+    data = tf.reshape(data, [data.shape[0], data.shape[1] * data.shape[2] * data.shape[3]])
+    mean = tf.math.reduce_mean(data, axis=0)
+    cov = tf.transpose(data - mean) @ (data - mean) / data.shape[0]
+    total_variance = tf.math.reduce_sum(tf.linalg.diag_part(cov))
 
-    # TODO: Compute the covariance matrix. The covariance matrix is
-    #   (data - mean)^T * (data - mean) / data.shape[0]
-    # where transpose can be computed using `tf.transpose` and matrix
-    # multiplication using either Python operator @ or `tf.linalg.matmul`.
-    cov = ...
-
-    # TODO: Compute the total variance, which is sum of the diagonal
-    # of the covariance matrix. To extract the diagonal use `tf.linalg.diag_part`
-    # and to sum a tensor use `tf.math.reduce_sum`.
-    total_variance = ...
-
-    # TODO: Now run `args.iterations` of the power iteration algorithm.
-    # Start with a vector of `cov.shape[0]` ones of type tf.float32 using `tf.ones`.
-    v = ...
+    v = tf.ones(cov.shape[0])
     for i in range(args.iterations):
-        # TODO: In the power iteration algorithm, we compute
-        # 1. v = cov * v
-        #    The matrix-vector multiplication can be computed using `tf.linalg.matvec`.
-        v = ...
-        # 2. s = l2_norm(v)
-        #    The l2_norm can be computed using `tf.linalg.norm`.
-        s = ...
-        # 3. v = v / s
+        v = tf.linalg.matvec(cov, v)
+        s = tf.linalg.norm(v)
         v /= s
 
     # The `v` is now the eigenvector of the largest eigenvalue, `s`. We now
     # compute the explained variance, which is a ration of `s` and `total_variance`.
     explained_variance = s / total_variance
 
-    # TODO: Write the total variance and explained variance in percents rounded to two decimal places.
     with open("pca_first.out", "w") as out_file:
         print("{:.2f} {:.2f}".format(total_variance, 100 * explained_variance), file=out_file)
