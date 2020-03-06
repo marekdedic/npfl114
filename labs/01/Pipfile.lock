@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "ca8ce324770c896f1d7afc145efeab2ab684322a76a676bedbb919bacb53c76e"
+            "sha256": "4bbcaed895a4621779c86b671a1ad4f8c43e675ac3026bb876552d9e2dfe6c29"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -325,6 +325,7 @@
             "hashes": [
                 "sha256:3a36da59d4e13fb140d04636aaf544f1a38364a7e3609a15cdaf01a5d3073b37"
             ],
+            "index": "pypi",
             "version": "==2.1.1"
         },
         "tensorflow": {
