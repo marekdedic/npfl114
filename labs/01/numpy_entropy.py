@@ -34,10 +34,12 @@ if __name__ == "__main__":
 
     print("{:.2f}".format(entropy))
 
-    CROSS_ENTROPY = -np.sum(NP_DATA_DIST * np.log(NP_MODEL_DIST))
+    with np.errstate(divide='ignore'):
+        CROSS_ENTROPY = -np.sum(NP_DATA_DIST * np.log(NP_MODEL_DIST))
     print("{:.2f}".format(CROSS_ENTROPY))
 
-    KL_DIVERGENCE = np.sum(NP_DATA_DIST_FILTERED * np.log(NP_DATA_DIST_FILTERED / NP_MODEL_DIST_FILTERED))
+    with np.errstate(divide='ignore'):
+        KL_DIVERGENCE = np.sum(NP_DATA_DIST_FILTERED * np.log(NP_DATA_DIST_FILTERED / NP_MODEL_DIST_FILTERED))
     print("{:.2f}".format(KL_DIVERGENCE))
 
     # TODO: Compute and print cross-entropy H(data distribution, model distribution)
