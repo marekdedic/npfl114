@@ -50,13 +50,15 @@ if __name__ == "__main__":
     # Create the model
     model = tf.keras.Sequential()
     model.add(tf.keras.layers.InputLayer([MNIST.H, MNIST.W, MNIST.C]))
-    # TODO: Finish the model. Namely add:
-    # - a `tf.keras.layers.Flatten()` layer
-    # - add `args.layers` number of fully connected hidden layers
-    #   `tf.keras.layers.Dense()` with  `args.hidden_layer` neurons, using activation
-    #   from `args.activation`, allowing "none", "relu", "tanh", "sigmoid".
-    # - finally, add a final fully connected layer with
-    #   `MNIST.LABELS` units and `tf.nn.softmax` activation.
+
+    if args.activation == "none":
+        args.activation = "linear"
+
+    model.add(tf.keras.layers.Flatten())
+    for i in range(args.layers):
+        model.add(tf.keras.layers.Dense(units=args.hidden_layer, activation=args.activation))
+
+    model.add(tf.keras.layers.Dense(units=MNIST.LABELS, activation="softmax"))
 
     model.compile(
         optimizer=tf.keras.optimizers.Adam(),
@@ -77,6 +79,7 @@ if __name__ == "__main__":
     )
     tb_callback.on_epoch_end(1, {"val_test_" + metric: value for metric, value in zip(model.metrics_names, test_logs)})
 
-    # TODO: Write test accuracy as percentages rounded to two decimal places.
+    accuracy = test_logs[1]
+
     with open("mnist_layers_activations.out", "w") as out_file:
         print("{:.2f}".format(100 * accuracy), file=out_file)
