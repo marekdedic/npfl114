@@ -13,18 +13,17 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
-    parser.add_argument("--decay", default=None, type=str, help="Learning decay rate type")
-    parser.add_argument("--epochs", default=10, type=int, help="Number of epochs.")
-    parser.add_argument("--hidden_layer", default=200, type=int, help="Size of the hidden layer.")
-    parser.add_argument("--learning_rate", default=0.01, type=float, help="Initial learning rate.")
-    parser.add_argument("--learning_rate_final", default=None, type=float, help="Final learning rate.")
-    parser.add_argument("--momentum", default=None, type=float, help="Momentum.")
-    parser.add_argument("--optimizer", default="SGD", type=str, help="Optimizer to use.")
+    parser.add_argument("--dropout", default=0, type=float, help="Dropout regularization.")
+    parser.add_argument("--epochs", default=30, type=int, help="Number of epochs.")
+    parser.add_argument("--hidden_layers", default="500", type=str, help="Hidden layer configuration.")
+    parser.add_argument("--l2", default=0, type=float, help="L2 regularization.")
+    parser.add_argument("--label_smoothing", default=0, type=float, help="Label smoothing.")
     parser.add_argument("--recodex", default=False, action="store_true", help="Evaluation in ReCodEx.")
     parser.add_argument("--seed", default=42, type=int, help="Random seed.")
     parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
     parser.add_argument("--verbose", default=False, action="store_true", help="Verbose TF logging.")
     args = parser.parse_args([] if "__file__" not in globals() else None)
+    args.hidden_layers = [int(hidden_layer) for hidden_layer in args.hidden_layers.split(",") if hidden_layer]
 
     # Fix random seeds and threads
     np.random.seed(args.seed)
@@ -50,42 +49,39 @@ if __name__ == "__main__":
     # Load data
     mnist = MNIST()
 
-    # Create the model
-    model = tf.keras.Sequential([
-        tf.keras.layers.Flatten(input_shape=[MNIST.H, MNIST.W, MNIST.C]),
-        tf.keras.layers.Dense(args.hidden_layer, activation=tf.nn.relu),
-        tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax),
-    ])
+    # TODO: Implement L2 regularization.
+    # If `args.l2` is nonzero, create a `tf.keras.regularizers.L1L2` regularizer
+    # and use it for all kernels (but not biases) of all Dense layers.
 
-    # TODO: Use the required `args.optimizer` (either `SGD` or `Adam`).
-    # For `SGD`, `args.momentum` can be specified.
-    # - If `args.decay` is not specified, pass the given `args.learning_rate`
-    #   directly to the optimizer as a `learning_rate` argument.
-    # - If `args.decay` is set, then
-    #   - for `polynomial`, use `tf.optimizers.schedules.PolynomialDecay`
-    #     using the given `args.learning_rate_final`;
-    #   - for `exponential`, use `tf.optimizers.schedules.ExponentialDecay`
-    #     and set `decay_rate` appropriately to reach `args.learning_rate_final`
-    #     just after the training (and keep the default `staircase=False`).
-    #   In both cases, `decay_steps` should be total number of training batches
-    #   and you should pass the created `{Polynomial,Exponential}Decay` to
-    #   the optizer using the `learning_rate` constructor argument.
-    #   The size of the training MNIST dataset it `mnist.train.size` and you
-    #   can assume is it divisible by `args.batch_size`.
-    #
-    #   If a learning rate schedule is used, you can find out the current learning
-    #   rate by using `model.optimizer.learning_rate(model.optimizer.iterations)`,
-    #   so after training this value should be `args.learning_rate_final`.
+    # TODO: Implement dropout.
+    # Add a `tf.keras.layers.Dropout` with `args.dropout` rate after the Flatten
+    # layer and after each Dense hidden layer (but not after the output Dense layer).
+
+    # Create the model
+    model = tf.keras.Sequential()
+    model.add(tf.keras.layers.Flatten(input_shape=[MNIST.H, MNIST.W, MNIST.C]))
+    for hidden_layer in args.hidden_layers:
+        model.add(tf.keras.layers.Dense(hidden_layer, activation=tf.nn.relu))
+    model.add(tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax))
+
+    # TODO: Implement label smoothing.
+    # Apply the given smoothing. You will need to change the
+    # `SparseCategorical{Crossentropy,Accuracy}` to `Categorical{Crossentropy,Accuracy}`
+    # because `label_smooting` is supported only by `CategoricalCrossentropy`.
+    # That means you also need to modify the labels of all three datasets
+    # (i.e., `mnist.{train,dev,test}.data["labels"]`) from indices of the gold class
+    # to a full categorical distribution (you can use either NumPy or there is
+    # a helper method also in the `tf.keras.utils`).
 
     model.compile(
-        optimizer=None,
+        optimizer=tf.optimizers.Adam(),
         loss=tf.losses.SparseCategoricalCrossentropy(),
-        metrics=[tf.metrics.SparseCategoricalAccuracy()],
+        metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
     )
 
     tb_callback=tf.keras.callbacks.TensorBoard(args.logdir, histogram_freq=1, update_freq=100, profile_batch=0)
     model.fit(
-        mnist.train.data["images"], mnist.train.data["labels"],
+        mnist.train.data["images"][:5000], mnist.train.data["labels"][:5000],
         batch_size=args.batch_size, epochs=args.epochs,
         validation_data=(mnist.dev.data["images"], mnist.dev.data["labels"]),
         callbacks=[tb_callback],
@@ -96,6 +92,6 @@ if __name__ == "__main__":
     )
     tb_callback.on_epoch_end(1, {"val_test_" + metric: value for metric, value in zip(model.metrics_names, test_logs)})
 
-    # TODO: Write test accuracy as percentages rounded to two decimal places.
-    with open("mnist_training.out", "w") as out_file:
+    accuracy = test_logs[model.metrics_names.index("accuracy")]
+    with open("mnist_regularization.out", "w") as out_file:
         print("{:.2f}".format(100 * accuracy), file=out_file)
