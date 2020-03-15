@@ -62,17 +62,19 @@ class Model(tf.Module):
             # tracks owned variables, so we could also used `self.trainable_variables`
             # (or even `self.variables`, which is useful for loading/saving).
             variables = [self._W1, self._b1, self._W2, self._b2]
+            variable_names = ["W1", "b1", "W2", "b2"]
 
             # TODO: Compute the gradient of the loss with respect to variables using
             # backpropagation algorithm via `tape.gradient`
             gradients = tape.gradient(loss, variables)
             ###
 
-            for variable, gradient in zip(variables, gradients):
+            for variable, variable_name, gradient in zip(variables, variable_names, gradients):
                 # TODO: Perform the SGD update with learning rate `args.learning_rate`
                 # for the variable and computed gradient. You can modify
                 # variable value with `variable.assign` or in this case the more
                 # efficient `variable.assign_sub`.
+                #print(variable_name + ": " + str(gradient))
                 variable.assign(variable - gradient * args.learning_rate);
                 ###
 
