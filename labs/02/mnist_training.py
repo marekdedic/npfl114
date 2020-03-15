@@ -76,9 +76,24 @@ if __name__ == "__main__":
     #   If a learning rate schedule is used, you can find out the current learning
     #   rate by using `model.optimizer.learning_rate(model.optimizer.iterations)`,
     #   so after training this value should be `args.learning_rate_final`.
+    batch_count = args.epochs * mnist.train.size / args.batch_size
+    learning_rate = args.learning_rate
+    if args.decay == "polynomial":
+        learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(args.learning_rate, batch_count, end_learning_rate=args.learning_rate_final)
+    elif args.decay == "exponential":
+        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(args.learning_rate, batch_count, args.learning_rate_final / args.learning_rate)
+
+    optimizer = tf.keras.optimizers.SGD()
+    if args.optimizer == "Adam":
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    elif args.optimizer == "SGD":
+        if args.momentum is not None:
+            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=args.momentum)
+        else:
+            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
     model.compile(
-        optimizer=None,
+        optimizer=optimizer,
         loss=tf.losses.SparseCategoricalCrossentropy(),
         metrics=[tf.metrics.SparseCategoricalAccuracy()],
     )
@@ -97,5 +112,8 @@ if __name__ == "__main__":
     tb_callback.on_epoch_end(1, {"val_test_" + metric: value for metric, value in zip(model.metrics_names, test_logs)})
 
     # TODO: Write test accuracy as percentages rounded to two decimal places.
+    accuracy = test_logs[1]
+    ###
+
     with open("mnist_training.out", "w") as out_file:
         print("{:.2f}".format(100 * accuracy), file=out_file)
