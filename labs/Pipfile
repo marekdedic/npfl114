@@ -1,0 +1,17 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+gym = "==0.15.4"
+numpy = "*"
+tensorflow = "*"
+tensorflow-addons = "*"
+tensorflow-hub = "==0.7.0"
+tensorflow-probability = "==0.9.0"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"
