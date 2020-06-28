@@ -34,6 +34,10 @@ class Network:
         # You can assume the resulting network is valid; it is fine to crash if it is not.
         #
         # Produce the results in variable `hidden`.
+        def replace_inner(match):
+            return "[" + re.sub(",", "%", re.sub("-", "&", match.group(1))) + "]"
+        encodedConfig = re.sub(r"\[([^\]]*)\]", replace_inner, args.cnn)
+        hidden = self.parse_configure(encodedConfig, inputs)
 
         # Add the final output layer
         outputs = tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax)(hidden)
@@ -45,6 +49,28 @@ class Network:
             metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
         )
         self._tb_callback=tf.keras.callbacks.TensorBoard(args.logdir, histogram_freq=1, update_freq=100, profile_batch=0)
+
+    def parse_configure(self, params, hidden):
+        if len(params) == 0:
+            return hidden
+        config = params.split(",")[0].split("-");
+        if config[0] == "C":
+            hidden = tf.keras.layers.Conv2D(filters=int(config[1]), kernel_size=int(config[2]), strides=int(config[3]), padding=config[4], activation=tf.nn.relu)(hidden)
+        if config[0] == "CB":
+            hidden = tf.keras.layers.Conv2D(filters=int(config[1]), kernel_size=int(config[2]), strides=int(config[3]), padding=config[4], use_bias=False)(hidden)
+            hidden = tf.keras.layers.BatchNormalization(axis=-1)(hidden)
+            hidden = tf.keras.activations.relu(hidden)
+        if config[0] == "M":
+            hidden = tf.keras.layers.MaxPool2D(pool_size=int(config[1]), strides=int(config[2]))(hidden)
+        if config[0] == "R":
+            hidden += self.parse_configure(re.sub("%", ",", re.sub("&", "-", config[1][1:-1])), hidden)
+        if config[0] == "F":
+            hidden = tf.keras.layers.Flatten()(hidden)
+        if config[0] == "H":
+            hidden = tf.keras.layers.Dense(int(config[1]), activation=tf.nn.relu)(hidden)
+        if config[0] == "D":
+            hidden = tf.keras.layers.Dropout(rate=float(config[1]))(hidden)
+        return self.parse_configure(",".join(params.split(",")[1:]), hidden)
 
     def train(self, mnist, args):
         self._model.fit(
