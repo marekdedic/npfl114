@@ -52,6 +52,10 @@ if __name__ == "__main__":
     # TODO: Implement L2 regularization.
     # If `args.l2` is nonzero, create a `tf.keras.regularizers.L1L2` regularizer
     # and use it for all kernels (but not biases) of all Dense layers.
+    if args.l2 == 0:
+        regularizer = None
+    else:
+        regularizer = tf.keras.regularizers.L1L2(l2=args.l2)
 
     # TODO: Implement dropout.
     # Add a `tf.keras.layers.Dropout` with `args.dropout` rate after the Flatten
@@ -60,9 +64,11 @@ if __name__ == "__main__":
     # Create the model
     model = tf.keras.Sequential()
     model.add(tf.keras.layers.Flatten(input_shape=[MNIST.H, MNIST.W, MNIST.C]))
+    model.add(tf.keras.layers.Dropout(rate=args.dropout))
     for hidden_layer in args.hidden_layers:
-        model.add(tf.keras.layers.Dense(hidden_layer, activation=tf.nn.relu))
-    model.add(tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax))
+        model.add(tf.keras.layers.Dense(hidden_layer, kernel_regularizer=regularizer, activation=tf.nn.relu))
+        model.add(tf.keras.layers.Dropout(rate=args.dropout))
+    model.add(tf.keras.layers.Dense(MNIST.LABELS, kernel_regularizer=regularizer, activation=tf.nn.softmax))
 
     # TODO: Implement label smoothing.
     # Apply the given smoothing. You will need to change the
@@ -73,10 +79,14 @@ if __name__ == "__main__":
     # to a full categorical distribution (you can use either NumPy or there is
     # a helper method also in the `tf.keras.utils`).
 
+    mnist.train.data["labels"] = tf.keras.utils.to_categorical(mnist.train.data["labels"])
+    mnist.dev.data["labels"] = tf.keras.utils.to_categorical(mnist.dev.data["labels"])
+    mnist.test.data["labels"] = tf.keras.utils.to_categorical(mnist.test.data["labels"])
+
     model.compile(
         optimizer=tf.optimizers.Adam(),
-        loss=tf.losses.SparseCategoricalCrossentropy(),
-        metrics=[tf.metrics.SparseCategoricalAccuracy(name="accuracy")],
+        loss=tf.losses.CategoricalCrossentropy(label_smoothing=args.label_smoothing),
+        metrics=[tf.metrics.CategoricalAccuracy(name="accuracy")],
     )
 
     tb_callback=tf.keras.callbacks.TensorBoard(args.logdir, histogram_freq=1, update_freq=100, profile_batch=0)
