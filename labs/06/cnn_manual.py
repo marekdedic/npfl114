@@ -31,7 +31,19 @@ class Convolution:
         # manually iterate through the individual pixels or batch examples
         # (and ideally also not over input and output channels).
         # However, you can manually iterate through the kernel size.
-        raise NotImplementedError()
+        batch_size, input_h, input_w, _ = inputs.shape
+        output_h = int(((input_h - self._kernel_size) / self._stride) + 1)
+        output_w = int(((input_w - self._kernel_size) / self._stride) + 1)
+
+        outputs = np.zeros((batch_size, output_h, output_w, self._channels))
+        for kernel_x in range(self._kernel_size):
+            for kernel_y in range(self._kernel_size):
+                max_y = input_h - self._kernel_size + kernel_y + 1
+                max_x = input_w - self._kernel_size + kernel_x + 1
+                outputs += inputs[:, kernel_y:max_y:self._stride, kernel_x:max_x:self._stride, :] @ self._kernel[kernel_y, kernel_x]
+
+        outputs += self._bias[tf.newaxis, tf.newaxis, tf.newaxis, :]
+        return tf.nn.relu(outputs)
 
     def backward(self, inputs, outputs, outputs_gradient):
         # TODO: Given the inputs of the layer, outputs of the layer
@@ -43,7 +55,23 @@ class Convolution:
         #     [self._kernel, self._bias]
         # - list of gradients of the layer variables with respect
         #   to the loss (in the same order as the previous argument)
-        raise NotImplementedError()
+
+        batch_size, input_h, input_w, input_channels = inputs.shape
+        inputs_gradient = np.zeros(inputs.shape, dtype=np.float32)
+        kernel_gradient = np.zeros(self._kernel.shape, dtype=np.float32)
+
+        relu_gradient = np.where(outputs > 0, outputs_gradient, 0)
+        bias_gradient = tf.reduce_sum(relu_gradient, axis=[0, 1, 2])
+
+        for kernel_x in range(self._kernel_size):
+            for kernel_y in range(self._kernel_size):
+                max_y = input_h - self._kernel_size + kernel_y + 1
+                max_x = input_w - self._kernel_size + kernel_x + 1
+
+                kernel_gradient[kernel_y, kernel_x] = tf.reduce_sum(inputs[:, kernel_y:max_y:self._stride, kernel_x:max_x:self._stride, :, tf.newaxis] * relu_gradient[:, :, :, tf.newaxis, :], axis=[0, 1, 2])
+                inputs_gradient[:, kernel_y:max_y:self._stride, kernel_x:max_x:self._stride, :] += relu_gradient @ tf.transpose(self._kernel[kernel_y, kernel_x, :])
+
+        return inputs_gradient, [self._kernel, self._bias], [tf.constant(kernel_gradient, dtype=tf.float32), tf.constant(bias_gradient, dtype=tf.float32)]
 
 class Network:
     def __init__(self, args):
