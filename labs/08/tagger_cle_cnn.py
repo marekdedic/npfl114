@@ -14,13 +14,16 @@ class Network:
         # TODO(we): Implement a one-layer RNN network. The input
         # `word_ids` consists of a batch of sentences, each
         # a sequence of word indices. Padded words have index 0.
+        word_ids = tf.keras.layers.Input(shape=[None])
 
         # TODO(we): Embed input words with dimensionality `args.we_dim`,
         # using `mask_zero=True`.
+        embedding = tf.keras.layers.Embedding(num_words, args.we_dim, mask_zero=True)(word_ids)
 
         # TODO(cle_rnn): The character-level embeddings utilize the input `charseqs`
         # containing a sequence of character indices for every input word.
         # Again, padded characters have index 0.
+        charseqs = tf.keras.layers.Input(shape=[None, None])
 
         # Because cuDNN implementation of RNN does not allow empty sequences,
         # we need to consider only charseqs for valid words.
@@ -30,6 +33,7 @@ class Network:
 
         # TODO: Embed the characters in `cle` using embeddings of size
         # `args.cle_dim`, not masking zero indices.
+        cle = tf.keras.layers.Embedding(num_chars, args.cle_dim, mask_zero=False)(cle)
 
         # TODO: Then, for each `width`
         # 2..`args.cnn_max_width`:
@@ -37,6 +41,12 @@ class Network:
         #   stride 1, "valid" padding and ReLU activation;
         # - process the result using a global max pooling.
         # Finally, concatenate the results.
+        per_width = []
+        for width in range(2, args.cnn_max_width + 1):
+            per_width_cle = tf.keras.layers.Conv1D(args.cnn_filters, kernel_size=width, strides=1, padding="valid", activation=tf.nn.relu)(cle)
+            per_width_cle = tf.keras.layers.GlobalMaxPool1D()(per_width_cle)
+            per_width.append(per_width_cle)
+        cle = tf.keras.layers.Concatenate()(per_width)
 
         # TODO: Pass the concatenated results through a highway network layer.
         # Therefore:
@@ -45,6 +55,9 @@ class Network:
         # - compute the result as the candidate output multiplied by the gate plus
         #   the input times one minus the gate.
         # Store the results back in `cle` variable.
+        transform_gate = tf.keras.layers.Dense(cle.shape[-1], activation=tf.nn.sigmoid)(cle)
+        candidate = tf.keras.layers.Dense(cle.shape[-1], activation=tf.nn.relu)(cle)
+        cle = candidate * transform_gate + cle * (1 - transform_gate)
 
         # Now we copy cle-s back to the original shape.
         cle = tf.scatter_nd(valid_words, cle, [tf.shape(charseqs)[0], tf.shape(charseqs)[1], cle.shape[-1]])
@@ -52,13 +65,17 @@ class Network:
         # TODO(cle_rnn): Concatenate the WE and CLE embeddings (in this order).
         # Use a `tf.keras.layers.Concatenate()` layer, which preserves masks
         # (contrary to raw methods like tf.concat).
+        embedding = tf.keras.layers.Concatenate()([embedding, cle])
 
         # TODO(we): Create specified `args.rnn_cell` RNN cell (LSTM, GRU) with
         # dimension `args.rnn_cell_dim` and apply it in a bidirectional way on
         # the embedded words, summing the outputs of forward and backward RNNs.
+        cell_type = tf.keras.layers.GRU if args.rnn_cell == "GRU" else tf.keras.layers.LSTM
+        cell = tf.keras.layers.Bidirectional(cell_type(args.rnn_cell_dim, return_sequences=True), merge_mode="sum")(embedding)
 
         # TODO(we): Add a softmax classification layer into `num_tags` classes, storing
         # the outputs in `predictions`.
+        predictions = tf.keras.layers.Dense(num_tags, activation="softmax")(cell)
 
         self.model = tf.keras.Model(inputs=[word_ids, charseqs], outputs=predictions)
         self.model.compile(optimizer=tf.optimizers.Adam(),
@@ -75,6 +92,7 @@ class Network:
             # Additionally, pass `reset_metrics=True`.
             #
             # Store the computed metrics in `metrics`.
+            metrics = self.model.train_on_batch([batch[dataset.FORMS].word_ids, batch[dataset.FORMS].charseqs], batch[dataset.TAGS].word_ids, reset_metrics=True)
 
             # Generate the summaries each 100 steps
             if self.model.optimizer.iterations % 100 == 0:
@@ -89,6 +107,7 @@ class Network:
             # TODO(cle_rnn): Evaluate the given batch with `test_on_batch`, using the
             # same inputs as in training, but pass `reset_metrics=False` to
             # aggregate the metrics. Store the metrics of the last batch as `metrics`.
+            metrics = self.model.test_on_batch([batch[dataset.FORMS].word_ids, batch[dataset.FORMS].charseqs], batch[dataset.TAGS].word_ids, reset_metrics=False)
         self.model.reset_metrics()
 
         metrics = dict(zip(self.model.metrics_names, metrics))
