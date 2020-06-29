@@ -20,6 +20,18 @@ class Network:
         # - flattening layer
         # - fully connected layer with 200 neurons and ReLU activation
         # obtaining a 200-dimensional feature representation of each image.
+        first = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+        second = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+
+        inner = tf.keras.models.Sequential([
+            tf.keras.layers.Conv2D(filters=10, kernel_size=3, strides=2, padding="valid", activation=tf.nn.relu),
+            tf.keras.layers.Conv2D(filters=20, kernel_size=3, strides=2, padding="valid", activation=tf.nn.relu),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(200, activation=tf.nn.relu)
+        ])
+
+        inner_first = inner(first)
+        inner_second = inner(second)
 
         # Then, it produces three outputs:
         # - classify the computed representation of the first image using a densely connected layer
@@ -30,10 +42,20 @@ class Network:
         #   them using another fully connected layer with 200 neurons and ReLU,
         #   and finally compute one output with `tf.nn.sigmoid` activation (the
         #   goal is to predict if the first digit is larger than the second)
+        classifier = tf.keras.layers.Dense(10, activation=tf.nn.softmax)
+        class_first = classifier(inner_first)
+        class_second = classifier(inner_second)
+        inner = tf.keras.layers.Concatenate()([inner_first, inner_second])
+        inner = tf.keras.layers.Dense(200, activation=tf.nn.relu)(inner)
+        isLarger = tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)(inner)
 
         # Train the outputs using SparseCategoricalCrossentropy for the first two inputs
         # and BinaryCrossentropy for the third one, utilizing Adam with default arguments.
-        raise NotImplementedError()
+        self.model = tf.keras.Model(inputs=[first, second], outputs=[class_first, class_second, isLarger])
+        self.model.compile(
+            optimizer=tf.keras.optimizers.Adam(),
+            loss=[tf.losses.SparseCategoricalCrossentropy(), tf.losses.SparseCategoricalCrossentropy(), tf.losses.BinaryCrossentropy()]
+        )
 
     @staticmethod
     def _prepare_batches(batches_generator):
@@ -43,6 +65,8 @@ class Network:
             if len(batches) == 2:
                 # TODO: yield suitable data for our task using two original
                 # batches (batches[0] and batches[1]).
+                model_inputs = [batches[0]["images"], batches[1]["images"]]
+                model_targets = [batches[0]["labels"], batches[1]["labels"], batches[0]["labels"] > batches[1]["labels"]]
                 yield (model_inputs, model_targets)
                 batches.clear()
 
@@ -50,7 +74,7 @@ class Network:
         for epoch in range(args.epochs):
             # TODO: Train for one epoch using `model.train_on_batch` for each batch.
             for batch in self._prepare_batches(mnist.train.batches(args.batch_size)):
-                pass
+                self.model.train_on_batch(batch[0], batch[1])
 
             # Print development evaluation
             print("Dev {}: directly predicting: {:.4f}, comparing digits: {:.4f}".format(epoch + 1, *self.evaluate(mnist.dev, args)))
@@ -62,10 +86,14 @@ class Network:
         #   model's direct prediction (i.e., its third output);
         # - the second is `undirect_accuracy`, which is computed by
         #   comparing the predicted labels (i.e., the first and second output).
+        direct_accuracy = tf.keras.metrics.BinaryAccuracy()
+        indirect_accuracy = tf.keras.metrics.BinaryAccuracy()
         for inputs, targets in self._prepare_batches(dataset.batches(args.batch_size)):
-            pass
+            first_pred, second_pred, isLarger_pred = self.model.predict_on_batch(inputs)
+            direct_accuracy.update_state(targets[2], isLarger_pred)
+            indirect_accuracy.update_state(targets[2], np.argmax(first_pred, axis=1) > np.argmax(second_pred, axis=1))
 
-        return direct_accuracy, indirect_accuracy
+        return direct_accuracy.result(), indirect_accuracy.result()
 
 
 if __name__ == "__main__":
