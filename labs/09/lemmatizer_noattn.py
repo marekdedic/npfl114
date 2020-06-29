@@ -23,6 +23,11 @@ class Network:
             # - `target_embedding` as an unmasked embedding layer of target chars into args.cle_dim dimensions
             # - `target_rnn_cell` as a GRUCell with args.rnn_dim units
             # - `target_output_layer` as a Dense layer into `num_target_chars`
+            self.source_embedding = tf.keras.layers.Embedding(num_source_chars, args.cle_dim, mask_zero=True)
+            self.source_rnn = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(args.rnn_dim, return_sequences=False), merge_mode="sum")
+            self.target_embedding = tf.keras.layers.Embedding(num_target_chars, args.cle_dim, mask_zero=False)
+            self.target_rnn_cell = tf.keras.layers.GRUCell(args.rnn_dim)
+            self.target_output_layer = tf.keras.layers.Dense(num_target_chars)
 
         class DecoderTraining(tfa.seq2seq.BaseDecoder):
             def __init__(self, lemmatizer, *args, **kwargs):
@@ -32,16 +37,16 @@ class Network:
             @property
             def batch_size(self):
                  # TODO: Return the batch size of self.source_states, using tf.shape
-                raise NotImplementedError()
+                return tf.shape(self.source_states)[0]
             @property
             def output_size(self):
                  # TODO: Return `tf.TensorShape(number of logits per each output element)`
                  # By output element we mean characters.
-                raise NotImplementedError()
+                return tf.TensorShape(self.lemmatizer.target_output_layer.units)
             @property
             def output_dtype(self):
                  # TODO: Return the type of the logits
-                raise NotImplementedError()
+                return tf.float32
 
             def initialize(self, layer_inputs, initial_state=None):
                 self.source_states, self.targets = layer_inputs
@@ -50,6 +55,9 @@ class Network:
                 # TODO: Define `inputs` as a vector of self.batch_size of MorphoDataset.Factor.BOW,
                 #   embedded using self.lemmatizer.target_embedding
                 # TODO: Define `states` as self.source_states
+                finished = tf.fill([self.batch_size], False)
+                inputs = self.lemmatizer.target_embedding(tf.fill([self.batch_size], MorphoDataset.Factor.BOW))
+                states = self.source_states
                 return finished, inputs, states
 
             def step(self, time, inputs, states, training):
@@ -58,6 +66,10 @@ class Network:
                 # TODO: Overwrite `outputs` by passing them through self.lemmatizer.target_output_layer,
                 # TODO: Define `next_inputs` by embedding `time`-th chars from `self.targets`.
                 # TODO: Define `finished` as True if `time`-th char from `self.targets` is EOW, False otherwise.
+                outputs, [states] = self.lemmatizer.target_rnn_cell(inputs, [states], training)
+                outputs = self.lemmatizer.target_output_layer(outputs)
+                next_inputs = self.lemmatizer.target_embedding(self.targets[:, time])
+                finished = self.targets[:, time] == MorphoDataset.Factor.EOW
                 return outputs, states, next_inputs, finished
 
         class DecoderPrediction(DecoderTraining):
@@ -65,16 +77,19 @@ class Network:
             def output_size(self):
                  # TODO: Return `tf.TensorShape()` describing a scalar element,
                  # because we are generating scalar predictions now.
-                raise NotImplementedError()
+                return tf.TensorShape([])
             @property
             def output_dtype(self):
                  # TODO: Return the type of the generated predictions
-                raise NotImplementedError()
+                return tf.int32
 
             def initialize(self, layer_inputs, initial_state=None):
                 self.source_states = layer_inputs
 
                 # TODO(DecoderTraining): Use the same initialization as in DecoderTraining.
+                finished = tf.fill([self.batch_size], False)
+                inputs = self.lemmatizer.target_embedding(tf.fill([self.batch_size], MorphoDataset.Factor.BOW))
+                states = self.source_states
                 return finished, inputs, states
 
             def step(self, time, inputs, states, training):
@@ -85,12 +100,19 @@ class Network:
                 #   `output_type=tf.int32` parameter.
                 # TODO: Define `next_inputs` by embedding the `outputs`
                 # TODO: Define `finished` as True if `outputs` are EOW, False otherwise.
+                outputs, [states] = self.lemmatizer.target_rnn_cell(inputs, [states], training)
+                outputs = self.lemmatizer.target_output_layer(outputs)
+                outputs = tf.argmax(outputs, axis=1, output_type=tf.int32)
+                next_inputs = self.lemmatizer.target_embedding(outputs)
+                finished = outputs == MorphoDataset.Factor.EOW
                 return outputs, states, next_inputs, finished
 
         def call(self, inputs):
             # If `inputs` is a list of two elements, we are in the teacher forcing mode.
             # Otherwise, we run in autoregressive mode.
-            if isinstance(inputs, list) and len(inputs) == 2:
+            print(len(inputs))
+            #if isinstance(inputs, list) and len(inputs) == 2:
+            if len(inputs) == 2:
                 source_charseqs, target_charseqs = inputs
             else:
                 source_charseqs, target_charseqs = inputs, None
@@ -106,13 +128,16 @@ class Network:
 
             # TODO: Embed source_charseqs using `source_embedding`
             # TODO: Run source_rnn on the embedded sequences, returning outputs in `source_states`.
+            embedded_charseqs = self.source_embedding(source_charseqs)
+            source_states = self.source_rnn(embedded_charseqs)
 
             # Run the appropriate decoder
             if target_charseqs is not None:
                 # TODO: Create a self.DecoderTraining by passing `self` to its constructor.
                 # Then run it on `[source_states, target_charseqs]` input,
                 # storing the first result in `output_layer` and the third result in `output_lens`.
-                pass
+                decoder_training = self.DecoderTraining(self)
+                output_layer, _, output_lens = decoder_training([source_states, target_charseqs])
             else:
                 # TODO: Create a self.DecoderPrediction by using:
                 # - `self` as first argument to its constructor
@@ -121,7 +146,8 @@ class Network:
                 #   must be at most 10 characters longer than the longest input.
                 # Then run it on `source_states`, storing the first result
                 # in `output_layer` and the third result in `output_lens`.
-                pass
+                decoder_prediction = self.DecoderPrediction(self, maximum_iterations=tf.shape(source_charseqs)[1] + 10)
+                output_layer, _, output_lens = decoder_prediction(source_states)
 
             # Reshape the output to the original matrix of lemmas
             # and explicitly set mask for loss and metric computation.
@@ -149,10 +175,12 @@ class Network:
     def train_epoch(self, dataset, args):
         for batch in dataset.batches(args.batch_size):
             # TODO: Create `targets` by append EOW after target lemmas
+            targets = self.append_eow(batch[dataset.LEMMAS].charseqs)
 
             # TODO: Train the lemmatizer using `train_on_batch` method, storing
             # result metrics in `metrics`. You need to pass the `targets`
             # both on input and as gold labels.
+            metrics = self.lemmatizer.train_on_batch([batch[dataset.FORMS].charseqs, targets], targets)
 
             # Generate the summaries each 10 steps
             iteration = int(self.lemmatizer.optimizer.iterations)
@@ -175,7 +203,7 @@ class Network:
 
     @tf.function(experimental_relax_shapes=True)
     def predict_batch(self, charseqs):
-        return self.lemmatizer(charseqs)
+        return self.lemmatizer([charseqs, None])
 
     def evaluate(self, dataset, dataset_name, args):
         correct_lemmas, total_lemmas = 0, 0
