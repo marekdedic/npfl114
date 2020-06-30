@@ -22,6 +22,14 @@ class Network:
         #   i-th layer with args.encoder_layers[i] units
         # - generate two outputs z_mean and z_log_variance, each passing the result
         #   of the above line through its own dense layer with args.z_dim units
+        inputs = tf.keras.layers.Input([MNIST.H, MNIST.W, MNIST.C])
+        hidden = tf.keras.layers.Flatten()(inputs)
+        for units in args.encoder_layers:
+            hidden = tf.keras.layers.Dense(units, activation=tf.nn.relu)(hidden)
+
+        z_mean = tf.keras.layers.Dense(args.z_dim)(hidden)
+        z_log_variance = tf.keras.layers.Dense(args.z_dim)(hidden)
+        self.encoder = tf.keras.Model(inputs=[inputs], outputs=[z_mean, z_log_variance])
 
         # TODO: Define `self.decoder` as a Model, which
         # - takes vectors of [args.z_dim] shape on input
@@ -30,6 +38,12 @@ class Network:
         # - applies output dense layer with MNIST.H * MNIST.W * MNIST.C units
         #   and a suitable output activation
         # - reshapes the output (tf.keras.layers.Reshape) to [MNIST.H, MNIST.W, MNIST.C]
+        self.decoder = tf.keras.Sequential([
+            tf.keras.layers.Input([args.z_dim]),
+            *[tf.keras.layers.Dense(units, activation=tf.nn.relu) for units in args.decoder_layers],
+            tf.keras.layers.Dense(MNIST.H * MNIST.W * MNIST.C, activation=tf.nn.sigmoid),
+            tf.keras.layers.Reshape([MNIST.H, MNIST.W, MNIST.C])
+        ])
 
         self._optimizer = tf.optimizers.Adam()
         self._reconstruction_loss_fn = tf.losses.BinaryCrossentropy()
@@ -48,23 +62,34 @@ class Network:
     def train_batch(self, images):
         with tf.GradientTape() as tape:
             # TODO: Compute z_mean and z_log_variance of given images using `self.encoder`; do not forget about `training=True`.
+            z_mean, z_log_variance = self.encoder(images, training=True)
 
             # TODO: Sample `z` from a Normal distribution with mean `z_mean` and
             # standard deviation `exp(z_log_variance / 2)`. Use reparametrization trick,
             # so sample `epsilon` from N(0, 1) using
             #   `tf.random.normal(z_mean.shape, seed=self._seed)`
             # and then multiply it by the standard deviation and add the mean.
+            z_std = tf.math.exp(z_log_variance / 2)
+            z = z_mean + self._sample_z(images.shape[0]) * z_std
 
             # TODO: Decode images using `z`.
+
+            generated_images = self.decoder(z)
 
             # TODO: Define `reconstruction_loss` using self._reconstruction_loss_fn
             # TODO: Define `latent_loss` as a mean of KL divergences of suitable distributions.
             # TODO: Define `loss` as a weighted sum of the reconstruction_loss (multiplied by the number
             # of pixels in an image) and the latent_loss (multiplied by self._z_dim). Note that
             # the `loss` should be weighted sum, not weighted average.
+            reconstruction_loss = self._reconstruction_loss_fn(images, generated_images)
+            latent_loss = tf.reduce_mean(self._kl_divergence(z_mean, z_std, 0, 1))
+            loss = reconstruction_loss * MNIST.H * MNIST.W * MNIST.C + latent_loss * self._z_dim
 
         # TODO: Compute gradients with respect to trainable variables of the encoder and the decoder.
         # TODO: Apply the gradients to encoder and decoder trainable variables (in one update).
+        trainable_variables = self.encoder.trainable_variables + self.decoder.trainable_variables
+        gradients = tape.gradient(loss, trainable_variables)
+        self._optimizer.apply_gradients(zip(gradients, trainable_variables))
 
         if self._optimizer.iterations % 100 == 0:
             tf.summary.experimental.set_step(self._optimizer.iterations)
