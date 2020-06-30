@@ -22,6 +22,12 @@ class Network:
         # - applies output dense layer with MNIST.H * MNIST.W * MNIST.C units
         #   and sigmoid activation
         # - reshapes the output (tf.keras.layers.Reshape) to [MNIST.H, MNIST.W, MNIST.C]
+        self.generator = tf.keras.Sequential([
+            tf.keras.layers.Input([args.z_dim]),
+            *[tf.keras.layers.Dense(units, activation=tf.nn.relu) for units in args.generator_layers],
+            tf.keras.layers.Dense(MNIST.H * MNIST.W * MNIST.C, activation=tf.nn.sigmoid),
+            tf.keras.layers.Reshape([MNIST.H, MNIST.W, MNIST.C])
+        ])
 
         # TODO: Define `self.discriminator` as a Model, which
         # - takes input images with shape [MNIST.H, MNIST.W, MNIST.C]
@@ -29,6 +35,12 @@ class Network:
         # - applies len(args.discriminator_layers) dense layers with ReLU activation,
         #   i-th layer with args.discriminator_layers[i] units
         # - applies output dense layer with one output and a suitable activation function
+        self.discriminator = tf.keras.Sequential([
+            tf.keras.layers.Input([MNIST.H, MNIST.W, MNIST.C]),
+            tf.keras.layers.Flatten(),
+            *[tf.keras.layers.Dense(units, activation=tf.nn.relu) for units in args.discriminator_layers],
+            tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)
+        ])
 
         self._generator_optimizer, self._discriminator_optimizer = tf.optimizers.Adam(), tf.optimizers.Adam()
         self._loss_fn = tf.losses.BinaryCrossentropy()
@@ -48,6 +60,13 @@ class Network:
         # - compute loss using `_loss_fn`, with target labels `tf.ones_like(discriminator_output)`
         # Then, compute the gradients with respect to generator trainable variables and update
         # generator trainable weights using self._generator_optimizer.
+        with tf.GradientTape() as tape:
+            random_images = self.generator(self._sample_z(images.shape[0]), training=True)
+            discrimination = self.discriminator(random_images, training=True)
+            generator_loss = self._loss_fn(tf.ones_like(discrimination), discrimination)
+
+        gradients = tape.gradient(generator_loss, self.generator.trainable_variables)
+        self._generator_optimizer.apply_gradients(zip(gradients, self.generator.trainable_variables))
 
         # TODO: Discriminator training. Using a Gradient tape:
         # - discriminate `images` with `training=True`, storing
@@ -59,6 +78,13 @@ class Network:
         #   - `_loss_fn` on discriminated_fake with suitable targets.
         # Then, compute the gradients with respect to discriminator trainable variables and update
         # discriminator trainable weights using self._discriminator_optimizer.
+        with tf.GradientTape() as tape:
+            discriminated_real = self.discriminator(images, training=True)
+            discriminated_fake = self.discriminator(random_images, training=True)
+            discriminator_loss = self._loss_fn(tf.ones_like(discriminated_real), discriminated_real) + self._loss_fn(tf.zeros_like(discriminated_fake), discriminated_fake)
+
+        gradients = tape.gradient(discriminator_loss, self.discriminator.trainable_variables)
+        self._discriminator_optimizer.apply_gradients(zip(gradients, self.discriminator.trainable_variables))
 
         if self._discriminator_optimizer.iterations % 100 == 0:
             tf.summary.experimental.set_step(self._discriminator_optimizer.iterations)
