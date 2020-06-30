@@ -37,16 +37,39 @@ if __name__ == "__main__":
         datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S"),
         ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items())))
     ))
+    os.makedirs(args.logdir, exist_ok=True)
 
     # Load the data
     modelnet = ModelNet(args.modelnet)
 
     # TODO: Create the model and train it
-    model = ...
+    inputs = tf.keras.layers.Input([modelnet.D, modelnet.H, modelnet.W, modelnet.C])
+    hidden = inputs
+    hidden = tf.keras.layers.Conv3D(8, kernel_size=3, padding="same", activation=tf.nn.relu)(hidden)
+    hidden = tf.keras.layers.Conv3D(8, kernel_size=3, padding="same", activation=tf.nn.relu)(hidden)
+    hidden = tf.keras.layers.MaxPool3D(pool_size=2)(hidden)
+    hidden = tf.keras.layers.Conv3D(16, kernel_size=3, padding="same", activation=tf.nn.relu)(hidden)
+    hidden = tf.keras.layers.Conv3D(16, kernel_size=3, padding="same", activation=tf.nn.relu)(hidden)
+    hidden = tf.keras.layers.MaxPool3D(pool_size=2)(hidden)
+    hidden = tf.keras.layers.Flatten()(hidden)
+    outputs = tf.keras.layers.Dense(len(modelnet.LABELS), activation=tf.nn.softmax)(hidden)
+    model = tf.keras.Model(inputs=[inputs], outputs=[outputs])
+
+    model.compile(
+        optimizer = tf.keras.optimizers.Adam(),
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+        metrics=[tf.keras.metrics.SparseCategoricalAccuracy(name="Dev set accuracy")]
+    )
+    model.fit(
+        modelnet.train.data["voxels"], modelnet.train.data["labels"],
+        batch_size=args.batch_size,
+        validation_data=(modelnet.dev.data["voxels"], modelnet.dev.data["labels"]),
+        epochs=args.epochs
+    )
 
     # Generate test set annotations, but in args.logdir to allow parallel execution.
     with open(os.path.join(args.logdir, "3d_recognition.txt"), "w", encoding="utf-8") as out_file:
         # TODO: Predict the probabilities on the test set
-        test_probabilities = model.predict(...)
+        test_probabilities = model.predict(modelnet.test.data["voxels"])
         for probs in test_probabilities:
             print(np.argmax(probs), file=out_file)
