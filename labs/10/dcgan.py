@@ -25,6 +25,20 @@ class Network:
         #   stride 2, same padding, and ReLU activation (again `use_bias=False`)
         # - applies transposed convolution with 1 filters, kernel size 5,
         #   stride 2, same padding, and sigmoid activation
+        self.generator = tf.keras.Sequential([
+            tf.keras.layers.Input([args.z_dim]),
+            tf.keras.layers.Dense(1024, use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.Dense(MNIST.H // 4 * MNIST.W // 4 * 64, use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.Reshape([MNIST.H // 4, MNIST.W // 4, 64]),
+            tf.keras.layers.Conv2DTranspose(32, kernel_size=5, strides=2, padding="same", use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.Conv2DTranspose(1, kernel_size=5, strides=2, padding="same", activation = tf.nn.sigmoid)
+        ])
 
         # TODO: Define `self.discriminator` as a Model, which
         # - takes input images with shape [MNIST.H, MNIST.W, MNIST.C]
@@ -37,6 +51,22 @@ class Network:
         # - flattens the current representation
         # - applies batch normalized dense layer with 1024 units and ReLU activation (`use_bias`)
         # - applies output dense layer with one output and a suitable activation function
+        self.discriminator = tf.keras.Sequential([
+            tf.keras.layers.Input([MNIST.H, MNIST.W, MNIST.C]),
+            tf.keras.layers.Conv2D(32, kernel_size=5, padding="same", use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.MaxPool2D(pool_size=2, strides=2),
+            tf.keras.layers.Conv2D(64, kernel_size=5, padding="same", use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.MaxPool2D(pool_size=2, strides=2),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(1024, use_bias=False),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.ReLU(),
+            tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)
+        ])
 
         self._generator_optimizer, self._discriminator_optimizer = tf.optimizers.Adam(), tf.optimizers.Adam()
         self._loss_fn = tf.losses.BinaryCrossentropy()
@@ -56,6 +86,13 @@ class Network:
         # - compute loss using `_loss_fn`, with target labels `tf.ones_like(discriminator_output)`
         # Then, compute the gradients with respect to generator trainable variables and update
         # generator trainable weights using self._generator_optimizer.
+        with tf.GradientTape() as tape:
+            random_images = self.generator(self._sample_z(images.shape[0]), training=True)
+            discrimination = self.discriminator(random_images, training=True)
+            generator_loss = self._loss_fn(tf.ones_like(discrimination), discrimination)
+
+        gradients = tape.gradient(generator_loss, self.generator.trainable_variables)
+        self._generator_optimizer.apply_gradients(zip(gradients, self.generator.trainable_variables))
 
         # TODO(gan): Discriminator training. Using a Gradient tape:
         # - discriminate `images` with `training=True`, storing
@@ -67,6 +104,13 @@ class Network:
         #   - `_loss_fn` on discriminated_fake with suitable targets.
         # Then, compute the gradients with respect to discriminator trainable variables and update
         # discriminator trainable weights using self._discriminator_optimizer.
+        with tf.GradientTape() as tape:
+            discriminated_real = self.discriminator(images, training=True)
+            discriminated_fake = self.discriminator(random_images, training=True)
+            discriminator_loss = self._loss_fn(tf.ones_like(discriminated_real), discriminated_real) + self._loss_fn(tf.zeros_like(discriminated_fake), discriminated_fake)
+
+        gradients = tape.gradient(discriminator_loss, self.discriminator.trainable_variables)
+        self._discriminator_optimizer.apply_gradients(zip(gradients, self.discriminator.trainable_variables))
 
         if self._discriminator_optimizer.iterations % 100 == 0:
             tf.summary.experimental.set_step(self._discriminator_optimizer.iterations)
